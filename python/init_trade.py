@@ -137,7 +137,7 @@ def import_sheet_0(ip, headers):
     instrument_ids = utils.call_request(ip, 'market-data-service', 'mktInstrumentIdsList', {}, headers)
     print('BCT标的物列表: {instrument_ids}'.format(instrument_ids=instrument_ids))
 
-    df = pd.read_excel(excel_file, header=1)
+    df = pd.read_excel(trade_excel_file, header=1)
     for i, v in df.iterrows():
         if i == 0:
             continue

@@ -11,4 +11,5 @@ login_body = {
 
 book_name = '交易簿1'  # BCT 交易簿
 
-excel_file = '/Users/luke.shi/Downloads/场外期权记录流水.xlsx'  # Excel文件路径
+trade_excel_file = '/Users/shilei/Downloads/场外期权记录流水.xlsx'  # Excel文件路径
+party_excel_file = r'/Users/shilei/Downloads/对手方信息表有交易.xlsx'  # Excel文件路径
