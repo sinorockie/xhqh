@@ -106,10 +106,17 @@ def import_sheet_0(ip, headers):
             contract = xinhu_party['bctcontract'] if xinhu_party['bctcontract'] else '空'
             trade_phone = xinhu_party['bcttradePhone']
             trade_email = xinhu_party['bcttradeEmail']
+            if not (xinhu_party['bctmasterAgreementId'] and xinhu_party['bctmasterAgreementId'] != '空'):
+                print(legal_name,'主协议编号为空')
+
+
             master_agreementId = xinhu_party['bctmasterAgreementId'] if xinhu_party['bctmasterAgreementId'] and \
                                                                         xinhu_party['bctmasterAgreementId'] != '空' else \
             xinhu_party['bctlegalName'] + '主协议编号'
             investor_type = xinhu_party['bctinvestorType']
+            if master_agreementId in ['JR-cwqq-190125','JR-cwqq-190129','JR-cwqq-190429','JR-cwqq-191113']:
+                # print(legal_name,master_agreementId)
+                master_agreementId=legal_name+'主协议编号'
             bct_party = {
                 "legalName": legal_name,
                 "clientType": client_type,
@@ -160,6 +167,9 @@ def import_sheet_0(ip, headers):
             utils.call('refPartySave', bct_party, 'reference-data-service', ip, headers)
             count += 1
         except Exception as e:
+            # error_msg="create party error"+repr(e)+'party name'+legal_name
+            # if "已经存在主协议编号为" in error_msg:
+            #     print(legal_name,master_agreementId)
             print("create party error", repr(e), 'party name', legal_name)
     print("create party end")
     print("create party success num", str(count))

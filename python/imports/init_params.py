@@ -10,12 +10,12 @@ login_body = {
 }
 
 
-# login_ip = '10.1.5.23'  # BCT IP地址
-# login_body = {
-#     'username': 'shilei',  # BCT 登陆用户名
-#     'password': 'shilei@2020'  # BCT 登陆密码
-# }
+login_ip = '106.14.159.92'  # BCT IP地址
+login_body = {
+    'username': 'admin',  # BCT 登陆用户名
+    'password': '12345'  # BCT 登陆密码
+}
 
-book_name = '交易簿1'  # BCT 交易簿
-trade_excel_file = 'D:/xinhu/流水表十表合一.csv'  # Excel文件路径
+book_name = 'test_xh_otc'  # BCT 交易簿
+trade_excel_file = 'D:/xinhu/BCT_format_trade_info_Vanilla.csv'  # Excel文件路径
 party_excel_file = 'D:/xinhu/export_bct_client.csv'  # Excel文件路径
