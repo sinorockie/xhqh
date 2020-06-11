@@ -206,6 +206,28 @@ def vertical_spread(trade_id, book, trade_date,
     return trade([position(asset, 'VERTICAL_SPREAD', counter_party)], trade_id, book, trade_date, trader, sales)
 
 
+def vertical_spread_position(option_type, strike_type, low_strike,high_strike,
+                     direction, underlyer, multiplier, specified_price, init_spot, expiration_date,
+                     notional_amount_type, notional, participation_rate, annualized, term, days_in_year,
+                     premium_type, premium, effective_date,counter_party):
+    asset = asset_generic(direction, underlyer, multiplier, specified_price, init_spot, expiration_date,
+                          notional_amount_type, notional, participation_rate, annualized, term, days_in_year,
+                          premium_type, premium, effective_date)
+    asset.update({
+        'optionType': option_type,
+        'exerciseType': _EXERCISE_EUROPEAN,
+        'strikeType': strike_type,
+        'lowStrike': low_strike,
+        'highStrike': high_strike
+    })
+    return position(asset, 'VERTICAL_SPREAD', counter_party)
+
+def vertical_spread_trade(positions,trade_id, book, trade_date, trader, sales):
+    return trade(positions, trade_id, book, trade_date, trader, sales)
+
+
+
+
 # 单鲨
 def single_shark_fin(trade_id, book, trade_date,
                      strike_type, strike, barrier_type, barrier, rebate_unit, rebate, rebate_type, observation_type,
@@ -454,6 +476,28 @@ def straddle(trade_id, book, trade_date,
         'highStrike': high_strike
     })
     return trade([position(asset, 'STRADDLE', counter_party)], trade_id, book, trade_date, trader, sales)
+
+
+def straddle_position(strike_type, low_strike,high_strike,
+                     direction, underlyer, multiplier, specified_price, init_spot, expiration_date,
+                     notional_amount_type, notional, participation_rate, annualized, term, days_in_year,
+                     premium_type, premium, effective_date,counter_party):
+    asset = asset_generic(direction, underlyer, multiplier, specified_price, init_spot, expiration_date,
+                          notional_amount_type, notional, participation_rate, annualized, term, days_in_year,
+                          premium_type, premium, effective_date)
+    del asset['participationRate']
+    asset.update({
+        'lowParticipationRate': participation_rate,
+        'highParticipationRate': participation_rate,
+        'strikeType': strike_type,
+        'lowStrike': low_strike,
+        'highStrike': high_strike
+    })
+    return position(asset, 'STRADDLE', counter_party)
+
+def straddle_trade(positions,trade_id, book, trade_date, trader, sales):
+    return trade(positions, trade_id, book, trade_date, trader, sales)
+
 
 
 # 亚式

@@ -31,10 +31,16 @@ _date_fmt = '%Y%m%d'
 _date_fmt2 = '%Y-%m-%d'
 
 
-def instrument_info(underlyer, host, token):
-    return utils.call('mktInstrumentInfo', {
-        'instrumentId': underlyer
-    }, 'market-data-service', host, token)
+def add_to_white_list(ip, headers):
+    instrument_list_response = utils.call_request(ip, "market-data-service", "mktInstrumentsListPaged", {}, headers)
+    instrument_list = instrument_list_response['page']
+    for instrument in instrument_list:
+        params = {
+            'venueCode': instrument['exchange'],
+            'instrumentId': instrument['instrumentId'],
+            'notionalLimit': 100000000000
+        }
+        utils.call_request(ip, 'market-data-service', 'mktInstrumentWhitelistSave', params, headers)
 
 
 def create_trade(trade, valid_time, host, token):
@@ -163,42 +169,13 @@ def get_all_bct_trade_dic(ip, headers):
     return bct_trade_dic
 
 
-# multiplier
-
-def import_sheet_0(ip, headers):
-    # 获取所有交易对手
-    party_sales_dic = get_all_legal_sales_dic(ip, headers)
-    print('BCT交易对手-销售名称字典: {party_sales_dic}'.format(party_sales_dic=party_sales_dic))
-    # 获取所有标的物
-    instruments_dic = get_all_instrument_dic(ip, headers)
-    instrument_ids = instruments_dic.keys()
-    print('BCT标的物列表: {instrument_ids}'.format(instrument_ids=instrument_ids))
-    xinhu_trades = pd.read_csv(trade_excel_file, encoding="gbk").to_dict(orient='records')
-    # 获取所有交易
-    bct_trade_dic = get_all_bct_trade_dic(ip, headers)
-    print('BCT交易ids: {bct_trade_ids}'.format(bct_trade_ids=bct_trade_dic.keys()))
-
-    xinhu_trade_map = {}
-    for v in xinhu_trades:
-        xinhu_trade_id = v['tradeId']
-        trade_id = None
-        position_id = None
-        id_split_strs = xinhu_trade_id.split('-')
-        if len(id_split_strs) > 1:
-            trade_id = id_split_strs[0]
-            position_id = id_split_strs[1]
-        else:
-            trade_id = id_split_strs[0]
-        if xinhu_trade_map.get(trade_id):
-            trade_list = xinhu_trade_map.get(trade_id)
-            trade_list.append(v)
-        else:
-            xinhu_trade_map[trade_id] = [v]
-    print("新湖瑞丰 csv trades num:"+str(len(xinhu_trade_map.keys())))
+def import_open_trades(xinhu_trade_map,bct_trade_dic,party_sales_dic,instruments_dic,instrument_ids,ip,headers):
+    print("create open trades start")
     bct_trades = []
     for trade_id, trades in xinhu_trade_map.items():
         bct_exist_trade = bct_trade_dic.get(trade_id)
-        ## TODO 删除已经存在的交易
+        if bct_exist_trade:
+            delete_trade(trade_id, ip, headers)
         positions = []
         for v in trades:
             party_name = v['partyName']
@@ -211,7 +188,7 @@ def import_sheet_0(ip, headers):
                 print('BCT不存在该销售 {sales_name}'.format(sales_name=str(sales_name)))
                 break
             sales_name = party_sales_dic.get(party_name)
-            underlyer = instrument_wind_code(v['underlyerInstrumentId'], instrument_ids) #TODO
+            underlyer = instrument_wind_code(v['underlyerInstrumentId'], instrument_ids)  # TODO
             if v['underlyerInstrumentId'].find('.') < 0 and underlyer == v['underlyerInstrumentId']:
                 print('BCT不存在合约代码 {underlyer} '.format(underlyer=str(underlyer)))
                 break
@@ -223,8 +200,11 @@ def import_sheet_0(ip, headers):
             option_type = _OPTION_CALL if v['optionType'].upper() == 'CALL' else _OPTION_PUT
             strike_type = v['strikeType']
             strike = v['strike']
+            strike_low = v['strike_low']
+            strike_high = v['strike_high']
             direction = _DIRECTION_SELLER if v['direction'].upper() == 'BUYER' else _DIRECTION_BUYER
-            multiplier = instruments_dic.get(underlyer)['multiplier'] if instruments_dic.get(underlyer)['multiplier'] else 1
+            multiplier = instruments_dic.get(underlyer)['multiplier'] if instruments_dic.get(underlyer)[
+                'multiplier'] else 1
             specified_price = 'close'  # v['specifiedPrice'] TODO
             init_spot = v['initialSpot']
             expiration_date = datetime.strptime(str(v['expirationDate']), _date_fmt2)
@@ -234,29 +214,123 @@ def import_sheet_0(ip, headers):
             annualized = True if v['annualized'] and v['annualized'] == 1 else False
             effective_date = datetime.strptime(str(v['effectiveDate']), _date_fmt2)
             term = (datetime.strptime(str(v['expirationDate']), _date_fmt2) - datetime.strptime(str(v['effectiveDate']),
-                                                                                               _date_fmt2)).days
+                                                                                                _date_fmt2)).days
             days_in_year = v['daysInYear']
             premium_type = v['premiumType']
             premium = v['premium']
             counter_party = party_name
-            position = vanilla_european_position(option_type, strike_type, strike,
-                                                 direction, underlyer, multiplier, specified_price, init_spot,
-                                                 expiration_date, notional_amount_type, notional, participation_rate,
-                                                 annualized, term, days_in_year, premium_type, premium, effective_date,
-                                                 counter_party)
+            product_type = v['productType']
+            if product_type == 'Vanilla期权':
+                position = vanilla_european_position(option_type, strike_type, strike,
+                                                     direction, underlyer, multiplier, specified_price, init_spot,
+                                                     expiration_date, notional_amount_type, notional,
+                                                     participation_rate,
+                                                     annualized, term, days_in_year, premium_type, premium,
+                                                     effective_date,
+                                                     counter_party)
+            if product_type == 'Vanilla跨式':
+                position = straddle_position(strike_type, strike_low, strike_high,
+                                             direction, underlyer, multiplier, specified_price, init_spot,
+                                             expiration_date, notional_amount_type, notional,
+                                             participation_rate,
+                                             annualized, term, days_in_year, premium_type, premium,
+                                             effective_date,
+                                             counter_party)
+            if product_type == 'Vanilla价差期权':
+                position = vertical_spread_position(option_type, strike_type, strike_low, strike_high,
+                                                    direction, underlyer, multiplier, specified_price, init_spot,
+                                                    expiration_date, notional_amount_type, notional, participation_rate,
+                                                    annualized, term, days_in_year, premium_type, premium,
+                                                    effective_date,
+                                                    counter_party)
             positions.append(position)
         if not positions:
             continue
         trader = 'admin'
-        trade = vanilla_european_trade(positions, trade_id, book_name, trade_date, trader, sales_name)
+        if product_type == 'Vanilla期权':
+            trade = vanilla_european_trade(positions, trade_id, book_name, trade_date, trader, sales_name)
+        if product_type == 'Vanilla跨式':
+            trade = straddle_trade(positions, trade_id, book_name, trade_date, trader, sales_name)
+        if product_type == 'Vanilla价差期权':
+            trade = vertical_spread_trade(positions, trade_id, book_name, trade_date, trader, sales_name)
         bct_trades.append(trade)
     for bct_trade in bct_trades:
         try:
-            create_trade(bct_trade,datetime.now(), login_ip, headers)
+            create_trade(bct_trade, datetime.now(), login_ip, headers)
         except Exception as e:
-            print('导入交易信息出错: {error} '.format(error=str(e)))
+            print('导入开仓交易信息出错: {error} '.format(error=str(e)))
+    print("create open trades end")
 
+def import_unwind_trades(xinhu_trade_map,bct_trade_dic,ip,headers):
+    print("create unwind trades start")
+    for trade_id, trades in xinhu_trade_map.items():
+        bct_exist_trade = bct_trade_dic.get(trade_id)
+        if not bct_exist_trade:
+            print('{trade_id}不存在,平仓失败'.format(trade_id=trade_id))
+            continue
+        position_num = len(trades)
+        for v in trades:
+            xinhu_trade_id = v['tradeId']
+            ##平仓名义本金
+            un_wind_amount = v['notionalAmount']
+            ##平仓金额
+            un_wind_amount_value = v['unWindAmountValue']
+            ##平仓日期
+            payment_date = v['paymentDate']
+            if v['lcmEventType'] == 1:  # 已了结
+                id_split_strs = xinhu_trade_id.split('-')
+                if len(id_split_strs) > 1 and position_num > 1:
+                    position_id = trade_id + '_' + str(int(id_split_strs[1]) - 1)
+                else:
+                    position_id = trade_id + '_0'
+                event_detail = {
+                    "unWindAmount": str(un_wind_amount),
+                    "unWindAmountValue": str(un_wind_amount_value),
+                    "paymentDate": payment_date
+                }
+                params = {
+                    "positionId": position_id,
+                    "tradeId": trade_id,
+                    "eventType": "UNWIND",
+                    "userLoginId": 'admin',
+                    "eventDetail": event_detail
+                }
+                try:
+                    utils.call("trdTradeLCMEventProcess", params, "trade-service", ip, headers)
+                except Exception as e:
+                    print('导入平仓交易信息出错: {error} '.format(error=str(e)))
+    print("create unwind trades end")
+
+
+
+
+def import_sheet_0(ip, headers):
+    # 获取bct所有交易对手
+    party_sales_dic = get_all_legal_sales_dic(ip, headers)
+    print('BCT交易对手-销售名称字典: {party_sales_dic}'.format(party_sales_dic=party_sales_dic))
+    # 获取bct所有标的物
+    instruments_dic = get_all_instrument_dic(ip, headers)
+    instrument_ids = instruments_dic.keys()
+    print('BCT标的物列表: {instrument_ids}'.format(instrument_ids=instrument_ids))
+    # 获取bct所有交易
+    bct_trade_dic = get_all_bct_trade_dic(ip, headers)
+    print('BCT交易ids: {bct_trade_ids}'.format(bct_trade_ids=bct_trade_dic.keys()))
+
+    xinhu_trades = pd.read_csv(trade_excel_file, encoding="gbk").to_dict(orient='records')
+    xinhu_trade_map = {}
+    for v in xinhu_trades:
+        xinhu_trade_id = v['tradeId']
+        trade_id = xinhu_trade_id.split('-')[0]
+        if xinhu_trade_map.get(trade_id):
+            trade_list = xinhu_trade_map.get(trade_id)
+            trade_list.append(v)
+        else:
+            xinhu_trade_map[trade_id] = [v]
+    print("新湖瑞丰 csv trades num:" + str(len(xinhu_trade_map.keys())))
+    import_open_trades(xinhu_trade_map,bct_trade_dic,party_sales_dic,instruments_dic,instrument_ids,ip,headers)
+    import_unwind_trades(xinhu_trade_map,bct_trade_dic,ip,headers)
 
 if __name__ == '__main__':
     headers = utils.login(login_ip, login_body)
+    # add_to_white_list(login_ip,headers)
     import_sheet_0(login_ip, headers)
