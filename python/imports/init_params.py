@@ -18,4 +18,5 @@ login_body = {
 
 book_name = 'test_xh_otc'  # BCT 交易簿
 trade_excel_file = 'D:/xinhu/BCT_format_trade_info.csv'  # Excel文件路径
+exchange_trade_excel_file = 'D:/xinhu/deals_raw_file_QQJYZH_20200612.csv'  # Excel文件路径
 party_excel_file = 'D:/xinhu/export_bct_client.csv'  # Excel文件路径

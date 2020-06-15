@@ -161,12 +161,10 @@ def get_all_instrument_dic(ip, headers):
         print("failed update market data for: " + ip + ",Exception:" + str(e))
 
 
-def get_all_bct_trade_dic(ip, headers):
+def get_all_bct_trade(ip, headers):
     bct_trades = utils.call('trdTradeSearch', {}, 'trade-service', ip, headers)
-    bct_trade_dic = {}
-    for bct_trade in bct_trades:
-        bct_trade_dic[bct_trade['tradeId']] = bct_trade
-    return bct_trade_dic
+
+    return bct_trades
 
 
 def convert_to_bct_trade_id(xinhu_trade_id):
@@ -313,52 +311,132 @@ def import_unwind_trades(xinhu_trade_map, bct_trade_dic, ip, headers):
     print("create unwind trades end")
 
 
-def import_sheet_0(ip, headers):
-    # 获取bct所有交易对手
-    party_sales_dic = get_all_legal_sales_dic(ip, headers)
-    print('BCT交易对手-销售名称字典: {party_sales_dic}'.format(party_sales_dic=party_sales_dic))
-    # 获取bct所有标的物
-    instruments_dic = get_all_instrument_dic(ip, headers)
-    instrument_ids = instruments_dic.keys()
-    print('BCT标的物列表: {instrument_ids}'.format(instrument_ids=instrument_ids))
+def export_trade(ip, headers):
     # 获取bct所有交易
-    bct_trade_dic = get_all_bct_trade_dic(ip, headers)
-    print('BCT交易ids: {bct_trade_ids}'.format(bct_trade_ids=bct_trade_dic.keys()))
+    bct_trades = get_all_bct_trade(ip, headers)
+    csv_data = []
+    for trade in bct_trades:
+        book_name = trade['bookName']
+        trade_id = trade['tradeId']
+        trader = trade['trader']
+        trade_status = trade['tradeStatus']
+        trade_date = trade['tradeDate']
+        sales_name = trade['salesName']
+        positions = trade['positions']
+        trade_confirm_id = trade['tradeConfirmId']
+        for position in positions:
+            position_id = position['positionId']
+            lcm_event_type = position['lcmEventType']
+            product_type = position['productType']
+            asset = position['asset']
+            direction = asset['direction']
+            exercise_type = asset.get('exerciseType')
+            underlyer_instrument_id = asset['underlyerInstrumentId']
+            initial_spot = asset['initialSpot']
+            strike_type = asset['strikeType']
 
-    xinhu_trades = pd.read_csv(trade_excel_file, encoding="gbk").to_dict(orient='records')
-    xinhu_trade_map = {}
-    for v in xinhu_trades:
-        xinhu_trade_id = v['tradeId']
-        trade_id = convert_to_bct_trade_id(xinhu_trade_id)
-        if xinhu_trade_map.get(trade_id):
-            trade_list = xinhu_trade_map.get(trade_id)
-            trade_list.append(v)
-        else:
-            xinhu_trade_map[trade_id] = [v]
-    print("新湖瑞丰 csv trades num:" + str(len(xinhu_trade_map.keys())))
+            strike = asset.get('strike')
+            low_strike = asset.get('lowStrike')
+            high_strike = asset.get('highStrike')
 
+            specified_price = asset['specifiedPrice']
+            settlement_date = asset['settlementDate']
+            term = asset['term']
+            annualized = asset['annualized']
+            days_in_year = asset['daysInYear']
 
-    ##找出新湖交易id重复的交易数据
-    for key in list(xinhu_trade_map.keys()):
-        values = xinhu_trade_map[key]
-        flag1 = False
-        flag2 = False
-        for v in values:
-            tradeId = v['tradeId']
-            if key == tradeId:
-                flag1 = True
-            else:
-                flag2 = True
-        if flag2 and flag1:
-            print("交易id重复：{key}".format(key=key))
-            del xinhu_trade_map[key]
-            continue
+            participation_rate = asset.get('participationRate')
+            low_participation_rate = asset.get('lowParticipationRate')
+            high_participation_rate = asset.get('highParticipationRate')
 
-    import_open_trades(xinhu_trade_map, bct_trade_dic, party_sales_dic, instruments_dic, instrument_ids, ip, headers)
-    import_unwind_trades(xinhu_trade_map, bct_trade_dic, ip, headers)
+            option_type = asset.get('optionType')  ##
+            notional_amount = asset['notionalAmount']
+            notional_amount_type = asset['notionalAmountType']
+            underlyer_multiplier = asset['underlyerMultiplier']
+            expiration_date = asset['expirationDate']
+            effective_date = asset['effectiveDate']
+            premium_type = asset['premiumType']
+            premium = asset['premium']
+            xinhu_trade = {
+                "book_name": book_name,
+                "trade_id": trade_id,
+                "trader": trader,
+                "trade_status": trade_status,
+                "trade_date": trade_date,
+                "sales_name": sales_name,
+                "trade_confirm_id": trade_confirm_id,
+                "position_id": position_id,
+                "lcm_event_type": lcm_event_type,
+                "product_type": product_type,
+                "direction": direction,
+                "exercise_type": exercise_type,
+                "underlyer_instrument_id": underlyer_instrument_id,
+                "initial_spot": initial_spot,
+                "strike_type": strike_type,
+
+                "strike": strike,  ##
+                "low_strike": low_strike,  ##
+                "high_strike": high_strike,  ##
+
+                "specified_price": specified_price,
+                "settlement_date": settlement_date,
+                "term": term,
+                "annualized": annualized,
+                "days_in_year": days_in_year,
+
+                "participation_rate": participation_rate,  ##
+                "low_participation_rate": low_participation_rate,
+                "high_participation_rate": high_participation_rate,
+
+                "option_type": option_type,  ##
+                "notional_amount": notional_amount,
+                "notional_amount_type": notional_amount_type,
+                "underlyer_multiplier": underlyer_multiplier,
+                "expiration_date": expiration_date,
+                "effective_date": effective_date,
+                "premium_type": premium_type,
+                "premium": premium
+            }
+            csv_data.append(xinhu_trade)
+    print(csv_data)
+    columns = ["book_name",
+               "trade_id",
+               "trader",
+               "trade_status",
+               "trade_date",
+               "sales_name",
+               "trade_confirm_id",
+               "position_id",
+               "lcm_event_type",
+               "product_type",
+               "direction",
+               "exercise_type",
+               "underlyer_instrument_id",
+               "initial_spot",
+               "strike_type",
+               "strike",  ##
+               "low_strike",  ##
+               "high_strike",  ##
+               "specified_price",
+               "settlement_date",
+               "term",
+               "annualized",
+               "days_in_year",
+               "participation_rate",  ##
+               "low_participation_rate",
+               "high_participation_rate",
+               "option_type",  ##
+               "notional_amount",
+               "notional_amount_type",
+               "underlyer_multiplier",
+               "expiration_date",
+               "effective_date",
+               "premium_type",
+               "premium"]
+    df = pd.DataFrame(columns=columns, data=csv_data)
+    df.to_csv('D:/xinhu/data.csv', encoding='utf-8', index=False)
 
 
 if __name__ == '__main__':
     headers = utils.login(login_ip, login_body)
-    # add_to_white_list(login_ip,headers)
-    import_sheet_0(login_ip, headers)
+    export_trade(login_ip, headers)
