@@ -49,8 +49,8 @@ def import_exchange_trades(ip, headers):
         open_close = "OPEN" if trade['direction'] == 1 else "CLOSE"  # 开平
         deal_price = trade['price']  # 交易价格
         deal_amount = trade['amount']  # 交易数量
-        deal_time = trade['trade_time']  # 交易时间 "2020-06-15T14:34:16"
-        trade_id = trade['order_sys_id'] + "-" + trade['trade_id']
+        deal_time = "2020-06-15T14:34:16"##trade['trade_time']  # 交易时间 "2020-06-15T14:34:16" TODO
+        trade_id = str(trade['order_sys_id']) + "-" + str(trade['trade_id'])
 
         trade_account = '新湖场内交易账号'  # 交易账户
         exchange_trade = {

@@ -50,6 +50,10 @@ def create_trade(trade, valid_time, host, token):
     }, 'trade-service', host, token)
 
 
+def unwind_trade(trade_event, ip, headers):
+    return utils.call("trdTradeLCMEventProcess", trade_event, "trade-service", ip, headers)
+
+
 def delete_trade(trade_id, host, token):
     return utils.call('trdTradeDelete', {
         'tradeId': trade_id
@@ -193,6 +197,8 @@ def import_open_trades(xinhu_trade_map, bct_trade_dic, party_sales_dic, instrume
         if bct_exist_trade:
             delete_trade(trade_id, ip, headers)
         positions = []
+        trade_date = None
+        sales_name = None
         for v in trades:
             party_name = v['partyName']
             sales_name = v['salesName']
@@ -235,6 +241,7 @@ def import_open_trades(xinhu_trade_map, bct_trade_dic, party_sales_dic, instrume
             premium = v['premium']
             counter_party = party_name
             product_type = v['productType']
+            position = None
             if product_type == 'Vanilla期权':
                 position = vanilla_european_position(option_type, strike_type, strike,
                                                      direction, underlyer, multiplier, specified_price, init_spot,
@@ -262,6 +269,7 @@ def import_open_trades(xinhu_trade_map, bct_trade_dic, party_sales_dic, instrume
         if not positions:
             continue
         trader = 'admin'
+        trade = None
         if product_type == 'Vanilla期权':
             trade = vanilla_european_trade(positions, trade_id, book_name, trade_date, trader, sales_name)
         if product_type == 'Vanilla跨式':
@@ -307,7 +315,7 @@ def import_unwind_trades(xinhu_trade_map, bct_trade_dic, ip, headers):
                     "eventDetail": event_detail
                 }
                 try:
-                    utils.call("trdTradeLCMEventProcess", params, "trade-service", ip, headers)
+                    unwind_trade(params, ip, headers)
                 except Exception as e:
                     print('导入平仓交易信息出错: {error} '.format(error=str(e)))
     print("create unwind trades end")
@@ -325,6 +333,9 @@ def import_sheet_0(ip, headers):
     bct_trade_dic = get_all_bct_trade_dic(ip, headers)
     print('BCT交易ids: {bct_trade_ids}'.format(bct_trade_ids=bct_trade_dic.keys()))
 
+    # for id in list(bct_trade_dic.keys()):
+    #     delete_trade(id, ip, headers)
+
     xinhu_trades = pd.read_csv(trade_excel_file, encoding="gbk").to_dict(orient='records')
     xinhu_trade_map = {}
     for v in xinhu_trades:
@@ -336,7 +347,6 @@ def import_sheet_0(ip, headers):
         else:
             xinhu_trade_map[trade_id] = [v]
     print("新湖瑞丰 csv trades num:" + str(len(xinhu_trade_map.keys())))
-
 
     ##找出新湖交易id重复的交易数据
     for key in list(xinhu_trade_map.keys()):
@@ -355,6 +365,7 @@ def import_sheet_0(ip, headers):
             continue
 
     import_open_trades(xinhu_trade_map, bct_trade_dic, party_sales_dic, instruments_dic, instrument_ids, ip, headers)
+    ## TODO 是否能自动到期
     import_unwind_trades(xinhu_trade_map, bct_trade_dic, ip, headers)
 
 

@@ -51,6 +51,29 @@ def list_to_sales_map(subsidiary, branch, sale, map):
     return map
 
 
+def get_all_legal_sales_dic(ip, headers):
+    legal_sales_dic = {}
+    try:
+        legal_list = utils.call('refPartyList', {}, 'reference-data-service', ip,
+                                headers)
+        for item in legal_list:
+            legal_sales_dic[item['legalName']] = item['salesName']
+        return legal_sales_dic
+    except Exception as e:
+        print("failed get legal data for: " + ip + ",Exception:" + str(e))
+
+
+def get_bct_sales_map(ip, headers):
+    bct_sales_map = {}
+    bct_sales = utils.call_request(ip, 'reference-data-service', 'refSalesList', {}, headers)
+    for bct_sales in bct_sales:
+        subsidiary = bct_sales['subsidiaryName']
+        branch = bct_sales['branchName']
+        sale = bct_sales['salesName']
+        list_to_sales_map(subsidiary, branch, sale, bct_sales_map)
+    return bct_sales_map
+
+
 def check_sale_exist(subsidiary, branch, sale, map):
     if map.get(subsidiary):
         subsidiary_map = map.get(subsidiary)
@@ -61,33 +84,57 @@ def check_sale_exist(subsidiary, branch, sale, map):
     return False
 
 
+def get_bct_subsidiary_branch_map(ip, headers):
+    bct_subsidiary_branch_map = {}
+    bct_subsidiary_branchs = utils.call_request(ip, 'reference-data-service', 'refSubsidiaryBranchList', {}, headers)
+    for item in bct_subsidiary_branchs:
+        branchs = bct_subsidiary_branch_map.get(item['subsidiaryName'])
+        if branchs:
+            branchs.append(item)
+        else:
+            bct_subsidiary_branch_map[item['subsidiaryName']] = [item]
+    return bct_subsidiary_branch_map
+
+
 def import_sheet_0(ip, headers):
     pd_data = pd.read_csv(party_excel_file, encoding="gbk", dtype={'code': str})
     xinhu_partys = pd_data.where(pd_data.notnull(), "空").to_dict(orient='records')
 
+    # 获取bct已经存在的分公司营业部信息
+    bct_subsidiary_branch_map = get_bct_subsidiary_branch_map(ip, headers)
+    bct_sales_map = get_bct_sales_map(ip, headers)
+
     print("create sales start")
-    xinhu_sales_map={}
+    xinhu_sales_map = {}
     for xinhu_party in xinhu_partys:
         subsidiary = xinhu_party['bctsubsidiaryName']
         branch = xinhu_party['bctbranchName']
         sale = xinhu_party['bctsalesName']
-        list_to_sales_map(subsidiary,branch,sale,xinhu_sales_map)
-    for subsidiary,branch_map in xinhu_sales_map.items():
-        subInfo = create_subsidiary(subsidiary, ip, headers)
-        for branch,sales_list in branch_map.items():
-            branchInfo = create_branch(subInfo['subsidiaryId'], branch, ip, headers)
+        list_to_sales_map(subsidiary, branch, sale, xinhu_sales_map)
+    for subsidiary, branch_map in xinhu_sales_map.items():
+        bct_branchs = []
+        if bct_subsidiary_branch_map.get(subsidiary):
+            bct_branchs = bct_subsidiary_branch_map.get(subsidiary)
+        if bct_branchs:
+            subInfo = bct_branchs[0]
+        else:
+            subInfo = create_subsidiary(subsidiary, ip, headers)
+        for branch, sales_list in branch_map.items():
+            branchInfo = None
+            for bct_branch in bct_branchs:
+                if branch == bct_branch['branchName']:
+                    branchInfo = bct_branch
+                    break
+            if not branchInfo:
+                branchInfo = create_branch(subInfo['subsidiaryId'], branch, ip, headers)
             for sale in sales_list:
-                create_sales(branchInfo['branchId'], sale, ip, headers)
+                if not check_sale_exist(subsidiary, branch, sale, bct_sales_map):
+                    create_sales(branchInfo['branchId'], sale, ip, headers)
     print("create sales end")
-
-    bct_sales_map = {}
-    bct_sales = utils.call_request(ip, 'reference-data-service', 'refSalesList', {}, headers)
-    for bct_sales in bct_sales:
-        subsidiary = bct_sales['subsidiaryName']
-        branch = bct_sales['branchName']
-        sale = bct_sales['salesName']
-        list_to_sales_map(subsidiary, branch, sale, bct_sales_map)
-
+    bct_sales_map = get_bct_sales_map(ip, headers)
+    # 获取bct所有交易对手
+    party_sales_dic = get_all_legal_sales_dic(ip, headers)
+    party_names = list(party_sales_dic.keys())
     print("create partys start")
     count = 0
     for xinhu_party in xinhu_partys:
@@ -99,24 +146,28 @@ def import_sheet_0(ip, headers):
             continue
         try:
             legal_name = xinhu_party['bctlegalName']
+            if legal_name in party_names:
+                print("交易对手{legal_name}已存在".format(legal_name=legal_name))
+                continue
             client_type = xinhu_party['bctClientType']
             legal_representative = xinhu_party['bctlegalRepresentative']
             client_level = xinhu_party['bctclientLevel']
-            address = xinhu_party['bctaddress'] if xinhu_party['bctaddress'] and xinhu_party['bctaddress'].strip() else '空'
+            address = xinhu_party['bctaddress'] if xinhu_party['bctaddress'] and xinhu_party[
+                'bctaddress'].strip() else '空'
             contract = xinhu_party['bctcontract'] if xinhu_party['bctcontract'] else '空'
             trade_phone = xinhu_party['bcttradePhone']
             trade_email = xinhu_party['bcttradeEmail']
             if not (xinhu_party['bctmasterAgreementId'] and xinhu_party['bctmasterAgreementId'] != '空'):
-                print(legal_name,'主协议编号为空')
-
+                print(legal_name, '主协议编号为空')
 
             master_agreementId = xinhu_party['bctmasterAgreementId'] if xinhu_party['bctmasterAgreementId'] and \
                                                                         xinhu_party['bctmasterAgreementId'] != '空' else \
-            xinhu_party['bctlegalName'] + '主协议编号'
+                xinhu_party['bctlegalName'] + '主协议编号'
             investor_type = xinhu_party['bctinvestorType']
-            if master_agreementId in ['JR-cwqq-190125','JR-cwqq-190129','JR-cwqq-190429','JR-cwqq-191113']:
+            if master_agreementId in ['JR-cwqq-190125', 'JR-cwqq-190129', 'JR-cwqq-190429', 'JR-cwqq-191113']:
+                # 特殊数据 以上主协议编号有重复
                 # print(legal_name,master_agreementId)
-                master_agreementId=legal_name+'主协议编号'
+                master_agreementId = legal_name + '主协议编号'
             bct_party = {
                 "legalName": legal_name,
                 "clientType": client_type,

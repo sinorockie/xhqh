@@ -43,10 +43,25 @@ def get_all_position_unwind_amount_dic(trade_ids, ip, headers):
     return position_unwind_amount_dic
 
 
+def get_all_lcm_events_dic(ip, headers):
+    events = utils.call('trdTradeCashFlowListAll', {}, 'trade-service', ip, headers)
+    lcm_event_dic = {}
+    for event in events:
+        position_events = lcm_event_dic.get(event['positionId'])
+        if position_events:
+            position_events.append(event)
+            position_events.sort(key=lambda x: x['createdAt'], reverse=True)
+        else:
+            lcm_event_dic[event['positionId']] = [event]
+    return lcm_event_dic
+
+
+
 def export_trade(ip, headers):
     # 获取bct所有交易
     bct_trades_dic = get_all_bct_trade_dic(ip, headers)
     position_unwind_amount_dic = get_all_position_unwind_amount_dic(list(bct_trades_dic.keys()), ip, headers)
+    lcm_event_dic = get_all_lcm_events_dic(ip, headers)
     csv_data = []
     for trade in bct_trades_dic.values():
         book_name = trade['bookName']
@@ -57,8 +72,14 @@ def export_trade(ip, headers):
         sales_name = trade['salesName']
         positions = trade['positions']
         trade_confirm_id = trade['tradeConfirmId']
+        index = 1
         for position in positions:
-            position_id = position['positionId']
+            counter_party_name = position['counterPartyName']
+            if len(positions) > 1:
+                xinhu_position_id = trade_id + '-' + str(index)
+                index += 1
+            else:
+                xinhu_position_id = trade_id
             lcm_event_type = position['lcmEventType']
             product_type = position['productType']
             asset = position['asset']
@@ -91,11 +112,17 @@ def export_trade(ip, headers):
             premium_type = asset['premiumType']
             premium = asset['premium']
 
-            unwind_amount_info = position_unwind_amount_dic.get(position_id)
+            unwind_amount_info = position_unwind_amount_dic.get(position['positionId'])
             initial_value = unwind_amount_info['initialValue']
             remain_value = unwind_amount_info['remainValue']
-
+            lcm_events = lcm_event_dic.get(position['positionId'])
+            payment_date = None
+            cash = None
+            if lcm_events and lcm_events[0]['lcmEventType'] == 'UNWIND':
+                payment_date = lcm_events[0]['paymentDate']
+                cash = lcm_events[0]['cashFlow']
             xinhu_trade = {
+                "counter_party_name": counter_party_name,
                 "book_name": book_name,
                 "trade_id": trade_id,
                 "trader": trader,
@@ -103,7 +130,7 @@ def export_trade(ip, headers):
                 "trade_date": trade_date,
                 "sales_name": sales_name,
                 "trade_confirm_id": trade_confirm_id,
-                "position_id": position_id,
+                "position_id": xinhu_position_id,
                 "lcm_event_type": lcm_event_type,
                 "product_type": product_type,
                 "direction": direction,
@@ -135,11 +162,14 @@ def export_trade(ip, headers):
                 "premium_type": premium_type,
                 "premium": premium,
                 "initial_value": initial_value,
-                "remain_value": remain_value
+                "remain_value": remain_value,
+                "payment_date": payment_date,
+                'cash': cash
             }
             csv_data.append(xinhu_trade)
     print(csv_data)
-    columns = ["book_name",
+    columns = ["counter_party_name",
+               "book_name",
                "trade_id",
                "trader",
                "trade_status",
@@ -174,8 +204,12 @@ def export_trade(ip, headers):
                "premium_type",
                "premium",
                "initial_value",
-               "remain_value"]
-    # columns = ["book_name(交易簿名称)",
+               "remain_value",
+               "payment_date",
+               'cash'
+               ]
+    # columns = ["counter_party_name",
+    #            "book_name(交易簿名称)",
     #            "trade_id（交易id）",
     #            "trader（交易员）",
     #            "trade_status（交易状态LIVE:存续期；CLOSE:结算）",
