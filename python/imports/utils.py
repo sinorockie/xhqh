@@ -1,11 +1,9 @@
 # -*- coding: utf-8 -*-
 
-import redis
 import logging
-import requests
-import numpy as np
 import os
-from datetime import datetime, timedelta
+
+import requests
 
 
 def get_bct_host():
@@ -14,11 +12,6 @@ def get_bct_host():
 
 def get_bct_port():
     return os.getenv('BCT_PORT', '16016')
-
-
-def get_redis_conn(ip):
-    redis_ip = os.getenv('REDIS_HOST', ip)
-    return redis.Redis(host=redis_ip, port=6379, db=0)
 
 
 def login(login_ip, login_body):

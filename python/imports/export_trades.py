@@ -246,10 +246,10 @@ def export_trade(ip, headers):
     #            "initial_value（初始名义本金）",
     #            "remain_value（剩余名义本金）"]
     df = pd.DataFrame(columns=columns, data=csv_data)
-    targe_path = 'D:/xinhu/data{datetime}.csv'.format(datetime=datetime.datetime.now().strftime(_datetime_fmt))
+    targe_path = export_trade_file+'bct_trades{datetime}.csv'.format(datetime=datetime.datetime.now().strftime(_datetime_fmt))
     df.to_csv(targe_path, encoding='utf-8', index=False)
 
 
 if __name__ == '__main__':
-    headers = utils.login(login_ip, login_body)
-    export_trade(login_ip, headers)
+    headers = utils.login(bct_login_ip, bct_login_body)
+    export_trade(bct_login_ip, headers)

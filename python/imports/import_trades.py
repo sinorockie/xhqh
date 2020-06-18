@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 
 import pandas as pd
+import vthread
 
 import python.imports.utils as utils
 from python.imports.init_params import *
@@ -29,6 +30,9 @@ _EXCHANGE_CLOSE = 'CLOSE'
 _datetime_fmt = '%Y-%m-%dT%H:%M:%S'
 _date_fmt = '%Y%m%d'
 _date_fmt2 = '%Y-%m-%d'
+
+_ACCOUNT_EVENT_UNWIND = 'UNWIND_TRADE'
+_ACCOUNT_EVENT_START = 'START_TRADE'
 
 
 def add_to_white_list(ip, headers):
@@ -223,7 +227,7 @@ def import_open_trades(xinhu_trade_map, bct_trade_dic, party_sales_dic, instrume
             strike = v['strike']
             strike_low = v['strike_low']
             strike_high = v['strike_high']
-            direction = _DIRECTION_SELLER if v['direction'].upper() == 'BUYER' else _DIRECTION_BUYER
+            direction = _DIRECTION_BUYER if v['direction'].upper() == 'BUYER' else _DIRECTION_SELLER
             multiplier = instruments_dic.get(underlyer)['multiplier'] if instruments_dic.get(underlyer)[
                 'multiplier'] else 1
             specified_price = 'close'  # v['specifiedPrice'] TODO
@@ -279,7 +283,7 @@ def import_open_trades(xinhu_trade_map, bct_trade_dic, party_sales_dic, instrume
         bct_trades.append(trade)
     for bct_trade in bct_trades:
         try:
-            create_trade(bct_trade, datetime.now(), login_ip, headers)
+            create_trade(bct_trade, datetime.now(), bct_login_ip, headers)
         except Exception as e:
             print('导入开仓交易信息出错: {error} '.format(error=str(e)))
     print("create open trades end")
@@ -336,7 +340,7 @@ def import_sheet_0(ip, headers):
     # for id in list(bct_trade_dic.keys()):
     #     delete_trade(id, ip, headers)
 
-    xinhu_trades = pd.read_csv(trade_excel_file, encoding="gbk").to_dict(orient='records')
+    xinhu_trades = pd.read_csv(import_trade_excel_file, encoding="gbk").to_dict(orient='records')
     xinhu_trade_map = {}
     for v in xinhu_trades:
         xinhu_trade_id = v['tradeId']
@@ -365,11 +369,126 @@ def import_sheet_0(ip, headers):
             continue
 
     import_open_trades(xinhu_trade_map, bct_trade_dic, party_sales_dic, instruments_dic, instrument_ids, ip, headers)
-    ## TODO 是否能自动到期
+
     import_unwind_trades(xinhu_trade_map, bct_trade_dic, ip, headers)
+    # 交易台账
+    process_cash(xinhu_trade_map, party_sales_dic, ip, headers)
+
+
+def process_cash(xinhu_trade_map, party_sales_dic, ip, headers):
+    for trade_id, trades in xinhu_trade_map.items():
+        try:
+            for v in trades:
+                party_name = v['partyName']
+                if not party_sales_dic.get(party_name):
+                    print('BCT不存在该用户 {party_name} '.format(party_name=str(party_name)))
+                    break
+                process_trade_cash(trade_id, party_name, 'START', v['premium'], ip, headers)
+                if v['lcmEventType'] == 1:
+                    process_trade_cash(trade_id, party_name, 'UNWIND', v['unWindAmountValue'], ip, headers)
+        except Exception as e:
+            print("交易资金录入未知异常" + repr(e))
+
+
+@vthread.pool(10)
+def process_trade_cash(trade_id, legal_name, event_name, cash_amount, bct_host, bct_token):
+    try:
+        account_info = search_account(legal_name, bct_host, bct_token)
+        print(account_info[0])
+
+        bank_info = search_bank(legal_name, bct_host, bct_token)
+        if not bank_info:
+            bank_dto = create_bank_account(legal_name + '开户行名称', legal_name, legal_name + '银行账号', legal_name + '银行账户名称',
+                                           'NORMAL',
+                                           legal_name + '支付系统行号', bct_host, bct_token)
+            bank_info = [bank_dto]
+        print(bank_info[0])
+
+        bank_account = bank_info[0]['bankAccount']
+        print(bank_account)
+
+        margin = account_info[0]['margin']  # 保证金
+        print('margin: ' + str(margin))
+
+        cash = account_info[0]['cash']  # 现金余额
+        print('cash: ' + str(cash))
+
+        debt = account_info[0]['debt']  # 负债
+        print('debt: ' + str(debt))
+
+        credit = account_info[0]['credit']  # 授信总额
+        print('credit: ' + str(credit))
+
+        credit_used = account_info[0]['creditUsed']  # 已用授信额度
+        print('credit(used): ' + str(credit_used))
+
+        if cash_amount > 0:
+            account_info = utils.call('clientSaveAccountOpRecord', {
+                'accountOpRecord': {
+                    "tradeId": trade_id,
+                    "accountId": legal_name + '0',
+                    "legalName": legal_name,
+                    "event": _ACCOUNT_EVENT_UNWIND if event_name == 'UNWIND' else _ACCOUNT_EVENT_START,
+                    "status": 'NORMAL',
+                    "cashChange": cash_amount
+                }
+            }, 'reference-data-service', bct_host, bct_token)
+            print(account_info)
+        else:
+            if abs(cash_amount) > cash:
+                record_info = utils.call('clientSaveAccountOpRecord', {
+                    'accountOpRecord': {
+                        "accountId": legal_name + '0',
+                        "legalName": legal_name,
+                        "event": 'TRADE_CASH_FLOW',
+                        "status": 'NORMAL',
+                        "cashChange": abs(cash_amount + cash),
+                        "debtChange": abs(cash_amount + cash)
+                    }
+                }, 'reference-data-service', bct_host, bct_token)
+                print(record_info)
+            account_info = utils.call('clientSaveAccountOpRecord', {
+                'accountOpRecord': {
+                    "tradeId": trade_id,
+                    "accountId": legal_name + '0',
+                    "legalName": legal_name,
+                    "event": _ACCOUNT_EVENT_UNWIND if event_name == 'UNWIND' else _ACCOUNT_EVENT_START,
+                    "status": 'NORMAL',
+                    "cashChange": cash_amount
+                }
+            }, 'reference-data-service', bct_host, bct_token)
+            print(account_info)
+
+    except Exception as e:
+        print("交易资金录入未知异常process_trade_cash" + repr(e))
+
+
+def search_account(legal_name, bct_host, bct_token):
+    return utils.call('clientAccountSearch', {
+        'legalName': legal_name
+    }, 'reference-data-service', bct_host, bct_token)
+
+
+def search_bank(legal_name, bct_host, bct_token):
+    return utils.call('refBankAccountSearch', {
+        'legalName': legal_name
+    }, 'reference-data-service', bct_host, bct_token)
+
+
+def create_bank_account(bank_name, legal_name, bank_account, bank_account_name, bank_account_status_enum,
+                        payment_system_code, ip, headers):
+    bank_account = {
+        'bankName': bank_name,  ##开户行名称
+        'legalName': legal_name,
+        'bankAccount': bank_account,  ##银行账户
+        'bankAccountName': bank_account_name,  ##银行账户名称
+        'bankAccountStatusEnum': bank_account_status_enum,  ##启用/停用
+        'paymentSystemCode': payment_system_code  ##支付系统行号
+    }
+    return utils.call_request(ip, 'reference-data-service', 'refBankAccountSave', bank_account, headers)
 
 
 if __name__ == '__main__':
-    headers = utils.login(login_ip, login_body)
+    headers = utils.login(bct_login_ip, bct_login_body)
     # add_to_white_list(login_ip,headers)
-    import_sheet_0(login_ip, headers)
+    import_sheet_0(bct_login_ip, headers)

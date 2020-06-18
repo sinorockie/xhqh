@@ -33,7 +33,7 @@ def get_all_instrument_dic(ip, headers):
 def import_exchange_trades(ip, headers):
     # 获取bct所有标的物
     instruments_dic = get_all_instrument_dic(ip, headers)
-    xinhu_exchange_trades = pd.read_csv(exchange_trade_excel_file, encoding="gbk").to_dict(orient='records')
+    xinhu_exchange_trades = pd.read_csv(import_exchange_trade_excel_file, encoding="gbk").to_dict(orient='records')
     records = []
     for trade in xinhu_exchange_trades:
         underlyer = instrument_wind_code(trade['code'], instruments_dic.keys())
@@ -76,5 +76,5 @@ def import_exchange_trades(ip, headers):
 
 # exeTradeRecordSave
 if __name__ == '__main__':
-    headers = utils.login(login_ip, login_body)
-    import_exchange_trades(login_ip, headers)
+    headers = utils.login(bct_login_ip, bct_login_body)
+    import_exchange_trades(bct_login_ip, headers)

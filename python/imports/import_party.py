@@ -97,7 +97,7 @@ def get_bct_subsidiary_branch_map(ip, headers):
 
 
 def import_sheet_0(ip, headers):
-    pd_data = pd.read_csv(party_excel_file, encoding="gbk", dtype={'code': str})
+    pd_data = pd.read_csv(import_party_excel_file, encoding="gbk", dtype={'code': str})
     xinhu_partys = pd_data.where(pd_data.notnull(), "空").to_dict(orient='records')
 
     # 获取bct已经存在的分公司营业部信息
@@ -227,5 +227,5 @@ def import_sheet_0(ip, headers):
 
 
 if __name__ == '__main__':
-    headers = utils.login(login_ip, login_body)
-    import_sheet_0(login_ip, headers)
+    headers = utils.login(bct_login_ip, bct_login_body)
+    import_sheet_0(bct_login_ip, headers)
