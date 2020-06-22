@@ -28,7 +28,7 @@ book_name = 'test_xh_otc'  # BCT 交易簿
 
 # 导入文件位置
 import_trade_excel_file = 'D:/xinhu/BCT_format_trade_info.csv'  # 交易导入文件路径
-import_exchange_trade_excel_file = 'D:/xinhu/deals_raw_file_QQJYZH_20200612.csv'  # 场内交易导入文件路径
+import_exchange_trade_excel_file = 'D:/xinhu/bct_trades_input_20200619_.csv'  # 场内交易导入文件路径
 import_party_excel_file = 'D:/xinhu/export_bct_client.csv'  # 客户导入文件路径
 import_vol_file = 'D:/xinhu/hedgevol_20200616.xlsx'  # 波动率导入
 ##导出文件位置

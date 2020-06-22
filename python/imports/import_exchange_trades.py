@@ -1,9 +1,13 @@
+import datetime
 import re
 
 import pandas as pd
 
 import python.imports.utils as utils
 from python.imports.init_params import *
+
+_datetime_fmt = '%Y-%m-%d-%H-%M-%S'
+_datetime_fmt1 = '%Y-%m-%dT%H:%M:%S'
 
 
 def instrument_wind_code(code, instrument_id_list):
@@ -49,7 +53,9 @@ def import_exchange_trades(ip, headers):
         open_close = "OPEN" if trade['direction'] == 1 else "CLOSE"  # 开平
         deal_price = trade['price']  # 交易价格
         deal_amount = trade['amount']  # 交易数量
-        deal_time = "2020-06-15T14:34:16"##trade['trade_time']  # 交易时间 "2020-06-15T14:34:16" TODO
+        # 2020 - 06 - 18 - 20 - 59 - 00
+        day_str = trade['dayStr']
+        deal_time = datetime.datetime.strptime(day_str, _datetime_fmt).strftime(_datetime_fmt1)
         trade_id = str(trade['order_sys_id']) + "-" + str(trade['trade_id'])
 
         trade_account = '新湖场内交易账号'  # 交易账户
