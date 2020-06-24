@@ -32,6 +32,7 @@ _date_fmt = '%Y%m%d'
 _date_fmt2 = '%Y-%m-%d'
 
 _ACCOUNT_EVENT_UNWIND = 'UNWIND_TRADE'
+_SETTLE_TRADE = 'SETTLE_TRADE'
 _ACCOUNT_EVENT_START = 'START_TRADE'
 
 
@@ -47,14 +48,15 @@ def add_to_white_list(ip, headers):
         utils.call_request(ip, 'market-data-service', 'mktInstrumentWhitelistSave', params, headers)
 
 
-def create_trade(trade, valid_time, host, token):
+def create_trade(trade, enrichment, valid_time, host, token):
     return utils.call('trdTradeCreate', {
         'trade': trade,
+        'enrichment': enrichment,
         'validTime': valid_time.strftime(_datetime_fmt)
     }, 'trade-service', host, token)
 
 
-def unwind_trade(trade_event, ip, headers):
+def trade_lcm_process(trade_event, ip, headers):
     return utils.call("trdTradeLCMEventProcess", trade_event, "trade-service", ip, headers)
 
 
@@ -119,18 +121,6 @@ def create_client_cash_flow(account_id, trade_id, cash_flow, margin_flow, host, 
     return utils.call('cliMmarkTradeTaskProcessed', {
         'uuidList': [task['uuid']]
     }, 'reference-data-service', host, token)
-
-
-def create_trade_and_client_cash_flow(trade, host, token):
-    trade_id = trade['tradeId']
-    # position = trade['positions'][0]
-    # counter_party = position['counterPartyCode']
-    # premium_cash = calc_premium(trade)
-    # account_id = search_account(counter_party, host, token)[0]['accountId']
-    # margin = 0 if position['asset']['direction'] == _DIRECTION_BUYER else 0
-    create_trade(trade, datetime.now(), host, token)
-    # create_client_cash_flow(account_id, trade_id, -premium_cash, -margin, host, token)
-    print('Created: ' + trade_id)
 
 
 def instrument_wind_code(code, instrument_id_list):
@@ -203,7 +193,14 @@ def import_open_trades(xinhu_trade_map, bct_trade_dic, party_sales_dic, instrume
         positions = []
         trade_date = None
         sales_name = None
+        position_index = 0
+        enrichment = []
         for v in trades:
+            # 开仓波动率
+            initial_vol = v['initialVol']
+            position_id = trade_id + '_' + str(position_index)
+            enrichment.append({'positionId': position_id, 'initialVol': initial_vol, 'trader': 'admin'})
+            position_index += 1
             party_name = v['partyName']
             sales_name = v['salesName']
             trade_date = v['tradeDate']
@@ -227,6 +224,11 @@ def import_open_trades(xinhu_trade_map, bct_trade_dic, party_sales_dic, instrume
             strike = v['strike']
             strike_low = v['strike_low']
             strike_high = v['strike_high']
+            if strike_low and strike_high:
+                if strike_low > strike_high:
+                    tepm_strike = strike_low
+                    strike_low = strike_high
+                    strike_high = tepm_strike
             direction = _DIRECTION_BUYER if v['direction'].upper() == 'BUYER' else _DIRECTION_SELLER
             multiplier = instruments_dic.get(underlyer)['multiplier'] if instruments_dic.get(underlyer)[
                 'multiplier'] else 1
@@ -280,16 +282,16 @@ def import_open_trades(xinhu_trade_map, bct_trade_dic, party_sales_dic, instrume
             trade = straddle_trade(positions, trade_id, book_name, trade_date, trader, sales_name)
         if product_type == 'Vanilla价差期权':
             trade = vertical_spread_trade(positions, trade_id, book_name, trade_date, trader, sales_name)
-        bct_trades.append(trade)
+        bct_trades.append({'trade': trade, 'enrichment': enrichment})
     for bct_trade in bct_trades:
         try:
-            create_trade(bct_trade, datetime.now(), bct_login_ip, headers)
+            create_trade(bct_trade['trade'], bct_trade['enrichment'], datetime.now(), bct_login_ip, headers)
         except Exception as e:
             print('导入开仓交易信息出错: {error} '.format(error=str(e)))
     print("create open trades end")
 
 
-def import_unwind_trades(xinhu_trade_map, bct_trade_dic, ip, headers):
+def import_unwind_or_expiration_trades(xinhu_trade_map, bct_trade_dic, instruments_dic, instrument_ids, ip, headers):
     print("create unwind trades start")
     for trade_id, trades in xinhu_trade_map.items():
         bct_exist_trade = bct_trade_dic.get(trade_id)
@@ -298,13 +300,13 @@ def import_unwind_trades(xinhu_trade_map, bct_trade_dic, ip, headers):
             continue
         for v in trades:
             xinhu_trade_id = v['tradeId']
-            ##平仓名义本金
-            un_wind_amount = v['notionalAmount']
-            ##平仓金额
-            un_wind_amount_value = v['unWindAmountValue']
-            ##平仓日期
-            payment_date = v['paymentDate']
-            if v['lcmEventType'] == 1:  # 已了结
+            if v['lcmEventType'] == 'UNWIND':  # 平仓
+                ##平仓名义本金
+                un_wind_amount = v['notionalAmount']
+                ##平仓金额
+                un_wind_amount_value = v['unWindAmountValue']
+                ##平仓日期
+                payment_date = v['paymentDate']
                 position_id = convert_to_bct_position_id(xinhu_trade_id)
                 event_detail = {
                     "unWindAmount": str(un_wind_amount),
@@ -319,9 +321,46 @@ def import_unwind_trades(xinhu_trade_map, bct_trade_dic, ip, headers):
                     "eventDetail": event_detail
                 }
                 try:
-                    unwind_trade(params, ip, headers)
+                    trade_lcm_process(params, ip, headers)
                 except Exception as e:
-                    print('导入平仓交易信息出错: {error} '.format(error=str(e)))
+                    print('xinhu_trade_id：{xinhu_trade_id}导入平仓交易信息出错: {error} '.format(xinhu_trade_id=xinhu_trade_id,
+                                                                                       error=str(e)))
+            elif v['lcmEventType'] == 'SETTLE':  # 行权
+                position_id = convert_to_bct_position_id(xinhu_trade_id)
+                underlyer_price = v['exerciseSpot']
+                settle_amount = v['unWindAmountValue']
+                notional_amount = v['notionalAmount']
+                underlyer = instrument_wind_code(v['underlyerInstrumentId'], instrument_ids)
+                if v['underlyerInstrumentId'].find('.') < 0 and underlyer == v['underlyerInstrumentId']:
+                    print('BCT不存在合约代码 {underlyer} '.format(underlyer=str(underlyer)))
+                    break
+                if not instruments_dic.get(underlyer):
+                    print('BCT不存在合约代码 {underlyer} '.format(underlyer=str(underlyer)))
+                    break
+                multiplier = instruments_dic.get(underlyer)['multiplier'] if instruments_dic.get(underlyer)[
+                    'multiplier'] else 1
+                numof_options = "%.13f" % (abs(notional_amount / v['initialSpot'] / multiplier))
+                ##平仓日期
+                payment_date = v['paymentDate']
+                event_detail = {
+                    "underlyerPrice": str(underlyer_price),
+                    "settleAmount": str(settle_amount),
+                    "notionalAmount": str(notional_amount),
+                    "numOfOptions": str(numof_options),
+                    "paymentDate": payment_date
+                }
+                params = {
+                    "positionId": position_id,
+                    "tradeId": trade_id,
+                    "eventType": "EXERCISE",
+                    "userLoginId": 'admin',
+                    "eventDetail": event_detail
+                }
+                try:
+                    trade_lcm_process(params, ip, headers)
+                except Exception as e:
+                    print('xinhu_trade_id：{xinhu_trade_id}导入行权交易信息出错: {error} '.format(xinhu_trade_id=xinhu_trade_id,
+                                                                                       error=str(e)))
     print("create unwind trades end")
 
 
@@ -370,7 +409,7 @@ def import_sheet_0(ip, headers):
 
     import_open_trades(xinhu_trade_map, bct_trade_dic, party_sales_dic, instruments_dic, instrument_ids, ip, headers)
 
-    import_unwind_trades(xinhu_trade_map, bct_trade_dic, ip, headers)
+    import_unwind_or_expiration_trades(xinhu_trade_map, bct_trade_dic, instruments_dic, instrument_ids, ip, headers)
     # 交易台账
     process_cash(xinhu_trade_map, party_sales_dic, ip, headers)
 
@@ -384,8 +423,8 @@ def process_cash(xinhu_trade_map, party_sales_dic, ip, headers):
                     print('BCT不存在该用户 {party_name} '.format(party_name=str(party_name)))
                     break
                 process_trade_cash(trade_id, party_name, 'START', v['premium'], ip, headers)
-                if v['lcmEventType'] == 1:
-                    process_trade_cash(trade_id, party_name, 'UNWIND', v['unWindAmountValue'], ip, headers)
+                if v['lcmEventType'] == 'UNWIND' or v['lcmEventType'] == 'SETTLE':
+                    process_trade_cash(trade_id, party_name, v['lcmEventType'], v['unWindAmountValue'], ip, headers)
         except Exception as e:
             print("交易资金录入未知异常" + repr(e))
 
@@ -422,13 +461,21 @@ def process_trade_cash(trade_id, legal_name, event_name, cash_amount, bct_host, 
         credit_used = account_info[0]['creditUsed']  # 已用授信额度
         print('credit(used): ' + str(credit_used))
 
+        event = _ACCOUNT_EVENT_UNWIND
+        if event_name == 'UNWIND':
+            event = _ACCOUNT_EVENT_UNWIND
+        if event_name == 'SETTLE':
+            event = _SETTLE_TRADE
+        if event_name == 'START':
+            event = _ACCOUNT_EVENT_START
+
         if cash_amount > 0:
             account_info = utils.call('clientSaveAccountOpRecord', {
                 'accountOpRecord': {
                     "tradeId": trade_id,
                     "accountId": legal_name + '0',
                     "legalName": legal_name,
-                    "event": _ACCOUNT_EVENT_UNWIND if event_name == 'UNWIND' else _ACCOUNT_EVENT_START,
+                    "event": event,
                     "status": 'NORMAL',
                     "cashChange": cash_amount
                 }
@@ -452,7 +499,7 @@ def process_trade_cash(trade_id, legal_name, event_name, cash_amount, bct_host, 
                     "tradeId": trade_id,
                     "accountId": legal_name + '0',
                     "legalName": legal_name,
-                    "event": _ACCOUNT_EVENT_UNWIND if event_name == 'UNWIND' else _ACCOUNT_EVENT_START,
+                    "event": event,
                     "status": 'NORMAL',
                     "cashChange": cash_amount
                 }

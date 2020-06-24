@@ -1,6 +1,13 @@
 # -*- coding: utf-8 -*-
+import datetime
+
+import pandas as pd
+
 import python.imports.utils as utils
 from python.imports.init_params import *
+
+_date_fmt1 = '%Y/%m/%d'
+_date_fmt2 = '%Y-%m-%d'
 
 
 def search_account(legal_name, bct_host, bct_token):
@@ -41,45 +48,43 @@ def process_bank_cash(legal_name, cash_amount, transfer_date, bct_host, bct_toke
     print('credit(used): ' + str(credit_used))
 
     if cash_amount > 0:
-        account_info = utils.call('cliFundEventSave', {
-            "clientId": legal_name,
-            "bankAccount": bank_account,
-            "paymentAmount": cash_amount,
-            "paymentDate": transfer_date,
-            "paymentDirection": "IN",
-            "accountDirection": "PARTY"
-        }, 'reference-data-service', bct_host, bct_token)
-        print(account_info)
-    else:
-        if abs(cash_amount) > cash:
-            record_info = utils.call('clientSaveAccountOpRecord', {
-                'accountOpRecord': {
-                    "accountId": legal_name + '0',
-                    "legalName": legal_name,
-                    "event": 'TRADE_CASH_FLOW',
-                    "status": 'NORMAL',
-                    "cashChange": abs(cash_amount + cash),
-                    "debtChange": abs(cash_amount + cash)
-                }
+        try:
+            account_info = utils.call('cliFundEventSave', {
+                "clientId": legal_name,
+                "bankAccount": bank_account,
+                "paymentAmount": cash_amount,
+                "paymentDate": transfer_date,
+                "paymentDirection": "IN",
+                "accountDirection": "PARTY"
             }, 'reference-data-service', bct_host, bct_token)
-            print(record_info)
-        account_info = utils.call('cliFundEventSave', {
-            "clientId": legal_name,
-            "bankAccount": bank_account,
-            "paymentAmount": abs(cash_amount),
-            "paymentDate": transfer_date,
-            "paymentDirection": "OUT",
-            "accountDirection": "PARTY"
-        }, 'reference-data-service', bct_host, bct_token)
-        print(account_info)
-
-
-def save_fund_info(fund_event, ip, headers):
-    try:
-        result = utils.call_request(ip, 'reference-data-service', 'cliFundEventSave', fund_event, headers)
-        return result
-    except Exception as  e:
-        print(repr(e))
+            print(account_info)
+        except Exception as  e:
+            print(repr(e))
+    else:
+        try:
+            if abs(cash_amount) > cash:
+                record_info = utils.call('clientSaveAccountOpRecord', {
+                    'accountOpRecord': {
+                        "accountId": legal_name + '0',
+                        "legalName": legal_name,
+                        "event": 'TRADE_CASH_FLOW',
+                        "status": 'NORMAL',
+                        "cashChange": abs(cash_amount + cash),
+                        "debtChange": abs(cash_amount + cash)
+                    }
+                }, 'reference-data-service', bct_host, bct_token)
+                print(record_info)
+            account_info = utils.call('cliFundEventSave', {
+                "clientId": legal_name,
+                "bankAccount": bank_account,
+                "paymentAmount": abs(cash_amount),
+                "paymentDate": transfer_date,
+                "paymentDirection": "OUT",
+                "accountDirection": "PARTY"
+            }, 'reference-data-service', bct_host, bct_token)
+            print(account_info)
+        except Exception as  e:
+            print(repr(e))
 
 
 def get_bct_bank_accounts(ip, headers):
@@ -113,37 +118,42 @@ def create_bank_account(bank_name, legal_name, bank_account, bank_account_name, 
 
 def import_fund_record(ip, headers):
     print("出入金导入开始")
-    xinhu_funds = [{"legal_name": '福州钰龙轧辊铸造有限公司'}]  ## TODO
+    xinhu_funds = pd.read_csv(import_fund_excel_file, encoding="gbk").to_dict(orient='records')
     legal_names = get_bct_legal_name(ip, headers)
     bank_accounts = get_bct_bank_accounts(ip, headers)
     out_fund = []
     in_fund = []
     for fund in xinhu_funds:
-        legal_name = fund['legal_name']
-        legal_name = legal_names.get(legal_name)
+        xinhu_legal_name = fund['Client']
+        legal_name = legal_names.get(xinhu_legal_name)
         if not legal_name:
-            print("系统不存在{legal_name}".format(legal_name=legal_name))
+            print("系统不存在:{xinhu_legal_name}".format(xinhu_legal_name=xinhu_legal_name))
             continue
         bank_account = bank_accounts.get(legal_name)
         if not bank_accounts.get(legal_name):
             create_bank_account(legal_name + '开户行名称', legal_name, legal_name + '银行账号', legal_name + '银行账户名称', 'NORMAL',
                                 legal_name + '支付系统行号', ip, headers)
-        payment_amount = 0  # TODO 待处理
-        payment_date = '2020-06-18'
-        payment_direction = 'IN'
+        payment_date = datetime.datetime.strptime(fund['Date'], _date_fmt1)
+        payment_date = datetime.datetime.strftime(payment_date, _date_fmt2)
+        in_payment_amount = fund['CashInFlow']
+        out_payment_amount = fund['CashOutFlow']
         try:
-            fund_event = {
+            in_fund.append({
                 'clientId': legal_name,
                 'bankAccount': bank_account,
-                'paymentAmount': abs(payment_amount),
+                'paymentAmount': abs(in_payment_amount),
                 'paymentDate': payment_date,
-                'paymentDirection': payment_direction,
+                'paymentDirection': "IN",
                 'accountDirection': 'PARTY'
-            }
-            if payment_direction == 'IN':
-                in_fund.append(fund_event)
-            else:
-                out_fund.append(fund_event)
+            })
+            out_fund.append({
+                'clientId': legal_name,
+                'bankAccount': bank_account,
+                'paymentAmount': abs(out_payment_amount),
+                'paymentDate': payment_date,
+                'paymentDirection': "OUT",
+                'accountDirection': 'PARTY'
+            })
         except Exception as e:
             print('交易对手{legal_name},出入金未知异常  mes: {error}'.format(legal_name=legal_name, error=repr(e)))
     for in_item in in_fund:

@@ -8,7 +8,7 @@ import pandas as pd
 import python.imports.utils as utils
 from python.imports.init_params import *
 
-_datetime_fmt = '%Y-%m-%d %H%M%S'
+_datetime_fmt = '%Y-%m-%d-%H-%M-%S'
 
 
 def instrument_wind_code(code, instrument_id_list):
@@ -56,12 +56,26 @@ def get_all_lcm_events_dic(ip, headers):
     return lcm_event_dic
 
 
+def get_all_position_enrichment_dic(position_ids, ip, headers):
+    position_enrichments = utils.call('trdGetPositionEnrichment', {'positionIds': position_ids}, 'trade-service', ip,
+                                      headers)
+    position_enrichment_dic = {}
+    for position_enrichment in position_enrichments:
+        position_enrichment_dic[position_enrichment['positionId']] = position_enrichment
+    return position_enrichment_dic
+
 
 def export_trade(ip, headers):
     # 获取bct所有交易
     bct_trades_dic = get_all_bct_trade_dic(ip, headers)
     position_unwind_amount_dic = get_all_position_unwind_amount_dic(list(bct_trades_dic.keys()), ip, headers)
     lcm_event_dic = get_all_lcm_events_dic(ip, headers)
+
+    position_ids = []
+    for trade in bct_trades_dic.values():
+        for position in trade['positions']:
+            position_ids.append(position['positionId'])
+    position_enrichment_dic = get_all_position_enrichment_dic(position_ids, ip, headers)
     csv_data = []
     for trade in bct_trades_dic.values():
         book_name = trade['bookName']
@@ -118,9 +132,20 @@ def export_trade(ip, headers):
             lcm_events = lcm_event_dic.get(position['positionId'])
             payment_date = None
             cash = None
+            exercise_spot = None
             if lcm_events and lcm_events[0]['lcmEventType'] == 'UNWIND':
                 payment_date = lcm_events[0]['paymentDate']
                 cash = lcm_events[0]['cashFlow']
+            if lcm_events and lcm_events[0]['lcmEventType'] == 'EXERCISE':
+                payment_date = lcm_events[0]['paymentDate']
+                cash = lcm_events[0]['cashFlow']
+                if lcm_events[0]['eventDetail'] and lcm_events[0]['eventDetail']['underlyerPrice']:
+                    exercise_spot = lcm_events[0]['eventDetail']['underlyerPrice']
+            # 开仓波动率
+            initial_vol = None
+            position_enrichment = position_enrichment_dic.get(position['positionId'])
+            if position_enrichment:
+                initial_vol = position_enrichment['initialVol']
             xinhu_trade = {
                 "counter_party_name": counter_party_name,
                 "book_name": book_name,
@@ -164,7 +189,9 @@ def export_trade(ip, headers):
                 "initial_value": initial_value,
                 "remain_value": remain_value,
                 "payment_date": payment_date,
-                'cash': cash
+                'cash': cash,
+                'initial_vol': initial_vol,
+                'exercise_spot': exercise_spot
             }
             csv_data.append(xinhu_trade)
     print(csv_data)
@@ -206,47 +233,13 @@ def export_trade(ip, headers):
                "initial_value",
                "remain_value",
                "payment_date",
-               'cash'
+               'cash',
+               'initial_vol',
+               'exercise_spot'
                ]
-    # columns = ["counter_party_name",
-    #            "book_name(交易簿名称)",
-    #            "trade_id（交易id）",
-    #            "trader（交易员）",
-    #            "trade_status（交易状态LIVE:存续期；CLOSE:结算）",
-    #            "trade_date（交易日期）",
-    #            "sales_name（销售）",
-    #            "trade_confirm_id（交易确认书编号）",
-    #            "position_id（多腿编号）",
-    #            "lcm_event_type（仓位状态OPEN:开仓；UNWIND_PARTIAL:部分平仓;UNWIND:平仓）",
-    #            "product_type（结构类型VANILLA_EUROPEAN:香草欧式;STRADDLE:跨式;SPREAD_EUROPEAN:价差欧式）",
-    #            "direction(买卖方向)",
-    #            "exercise_type(行权类型EUROPEAN:欧式;AMERICAN:美式)",
-    #            "underlyer_instrument_id（标的物）",
-    #            "initial_spot（期初价格）",
-    #            "strike_type（行权类型CNY:人民币;PERCENT:百分比）",
-    #            "strike（行权价）",  ##
-    #            "low_strike（低行权价）",  ##
-    #            "high_strike（高行权价）",  ##
-    #            "specified_price（结算方式CLOSE:收盘价;OPEN:开盘价）",
-    #            "settlement_date（结算日）",
-    #            "term（期限）",
-    #            "annualized（年化:TRUE/非年化:FALSE）",
-    #            "days_in_year(年度计息天数)",
-    #            "participation_rate(参与率)",  ##
-    #            "low_participation_rate（低参与率）",
-    #            "high_participation_rate（高参与率）",
-    #            "option_type（CALL:看涨/PUT:看跌）",  ##
-    #            "notional_amount（名义本金）",
-    #            "notional_amount_type（名义本金类型CNY:人民币;PERCENT:百分比）",
-    #            "underlyer_multiplier（合约乘数）",
-    #            "expiration_date（到期日）",
-    #            "effective_date（起始日）",
-    #            "premium_type（期权费类型CNY:人民币;PERCENT:百分比）",
-    #            "premium（期权费）",
-    #            "initial_value（初始名义本金）",
-    #            "remain_value（剩余名义本金）"]
     df = pd.DataFrame(columns=columns, data=csv_data)
-    targe_path = export_trade_file+'bct_trades{datetime}.csv'.format(datetime=datetime.datetime.now().strftime(_datetime_fmt))
+    targe_path = export_trade_file + 'bct_trades{datetime}.csv'.format(
+        datetime=datetime.datetime.now().strftime(_datetime_fmt))
     df.to_csv(targe_path, encoding='utf-8', index=False)
 
 

@@ -27,10 +27,11 @@ bct_login_body = {
 book_name = 'test_xh_otc'  # BCT 交易簿
 
 # 导入文件位置
-import_trade_excel_file = 'D:/xinhu/BCT_format_trade_info.csv'  # 交易导入文件路径
+import_trade_excel_file = 'D:/xinhu/BCT_format_trade_info_20200624.csv'  # 交易导入文件路径
 import_exchange_trade_excel_file = 'D:/xinhu/bct_trades_input_20200619_.csv'  # 场内交易导入文件路径
 import_party_excel_file = 'D:/xinhu/export_bct_client.csv'  # 客户导入文件路径
 import_vol_file = 'D:/xinhu/hedgevol_20200616.xlsx'  # 波动率导入
+import_fund_excel_file = 'D:/xinhu/client_cash_flow.csv'  # 出入金导入文件路径
 ##导出文件位置
 export_trade_file = 'D:/xinhu/'  # 交易导出文件路径
 export_terminal_trade_file = 'D:/xinhu/'  # 终端交易导出文件路径
